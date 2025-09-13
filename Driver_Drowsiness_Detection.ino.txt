@@ -1,0 +1,81 @@
+// Driver_Drowsiness_Detection.ino
+// Arduino side: receives serial alerts from Pi and sends CAN frame + local buzzer/LED alert
+// Hardware: Arduino Uno/Mega + MCP2515 CAN module (SPI) + Buzzer + LED
+
+#include <SPI.h>
+#include "mcp_can.h"
+
+#define CAN_CS_PIN 10    // adjust per wiring
+MCP_CAN CAN(CAN_CS_PIN);
+
+#define BUZZER_PIN 8
+#define LED_PIN 7
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(LED_PIN, LOW);
+
+  while (CAN_OK != CAN.begin(CAN_500KBPS)) { // start CAN at 500kbps
+    Serial.println("CAN BUS Shield init fail, retrying...");
+    delay(1000);
+  }
+  Serial.println("CAN BUS Shield init OK!");
+}
+
+void loop() {
+  // Listen for messages from Pi via serial (simple protocol)
+  if (Serial.available()) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    Serial.print("Received: ");
+    Serial.println(line);
+
+    if (line == "DROWSY") {
+      triggerLocalAlert();
+      sendCANAlert(0x100, "DROWSY");
+    } else if (line == "DISTRACT") {
+      triggerLocalAlert();
+      sendCANAlert(0x101, "DISTRACT");
+    } else if (line == "CLEAR") {
+      clearAlert();
+      sendCANAlert(0x102, "CLEAR");
+    }
+  }
+
+  // Could also read vehicle CAN and respond — omitted for brevity
+  delay(50);
+}
+
+void triggerLocalAlert() {
+  // Simple audible and visual alert pattern
+  for (int i = 0; i < 4; i++) {
+    digitalWrite(LED_PIN, HIGH);
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(200);
+    digitalWrite(LED_PIN, LOW);
+    digitalWrite(BUZZER_PIN, LOW);
+    delay(200);
+  }
+}
+
+void clearAlert() {
+  digitalWrite(LED_PIN, LOW);
+  digitalWrite(BUZZER_PIN, LOW);
+}
+
+// Send simple CAN frame with a small payload (ASCII tag)
+void sendCANAlert(unsigned long id, const char* tag) {
+  byte data[8] = {0};
+  int len = strlen(tag);
+  if (len > 8) len = 8;
+  for (int i = 0; i < len; i++) data[i] = tag[i];
+  byte sendStat = CAN.sendMsgBuf(id, 0, 8, data);
+  if (sendStat == CAN_OK) {
+    Serial.println("CAN message sent");
+  } else {
+    Serial.println("CAN send failed");
+  }
+}
